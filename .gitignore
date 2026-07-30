@@ -1,0 +1,17 @@
+# Compiled binaries
+proxy/echo_server
+proxy/proxy
+proxy/tls_proxy
+
+# Generated certs (keep the scripts, not the generated files)
+certs/*.crt
+certs/*.key
+certs/*.csr
+certs/*.srl
+certs/*.ext
+
+# VS Code
+.vscode/
+
+# Mac
+.DS_Store
