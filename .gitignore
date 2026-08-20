@@ -15,3 +15,6 @@ certs/*.ext
 
 # Mac
 .DS_Store
+
+# Maven build output
+policy-engine/target/

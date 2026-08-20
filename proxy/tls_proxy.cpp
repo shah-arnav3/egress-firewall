@@ -62,6 +62,49 @@ int tcp_connect(const std::string& host, const std::string& port) {
 }
 
 // -------------------------------------------------------
+// POLICY CHECK: ask the Java policy engine whether this
+// host is allowed. Returns true if allowed, false if denied.
+// -------------------------------------------------------
+bool check_policy(const std::string& host, const std::string& port) {
+    // Connect to the policy engine on localhost:8081
+    int policy_fd = tcp_connect("127.0.0.1", "8081");
+    if (policy_fd < 0) {
+        std::cerr << "Could not reach policy engine — failing open (allowing)\n";
+        return true;  // fail open for now: if policy engine is down, allow traffic
+    }
+
+    // Build the HTTP POST request manually
+    std::string body = "{\"host\":\"" + host + "\",\"port\":\"" + port + "\"}";
+    std::string request =
+        "POST /check HTTP/1.1\r\n"
+        "Host: 127.0.0.1:8081\r\n"
+        "Content-Type: application/json\r\n"
+        "Content-Length: " + std::to_string(body.size()) + "\r\n"
+        "Connection: close\r\n"
+        "\r\n" + body;
+
+    send(policy_fd, request.c_str(), request.size(), 0);
+
+    // Read the full response
+    std::string response;
+    char buf[4096];
+    ssize_t n;
+    while ((n = recv(policy_fd, buf, sizeof(buf), 0)) > 0) {
+        response.append(buf, n);
+    }
+    close(policy_fd);
+
+    // Check if the response body contains "true"
+    // Simple string search — good enough for a demo
+    bool allowed = response.find("\"allowed\":true") != std::string::npos;
+
+    std::cout << "Policy decision for " << host << ": "
+              << (allowed ? "ALLOWED" : "DENIED") << "\n";
+
+    return allowed;
+}
+
+// -------------------------------------------------------
 // STEP 1: Read the HTTP CONNECT request from the client
 // and extract the target hostname and port.
 //
@@ -218,6 +261,14 @@ int main() {
     // Step 2: reply 200 to client — tunnel is "established"
     std::string response = "HTTP/1.1 200 Connection Established\r\n\r\n";
     send(client_fd, response.c_str(), response.size(), 0);
+    // Step 2.5: check policy engine before proceeding
+    if (!check_policy(host, port)) {
+        std::string blocked = "HTTP/1.1 403 Forbidden\r\n\r\nBlocked by egress firewall\n";
+        send(client_fd, blocked.c_str(), blocked.size(), 0);
+        close(client_fd);
+        close(server_fd);
+        return 1;
+    }
 
     // Step 3: generate fake cert for this hostname
     std::string cert_path, key_path;
